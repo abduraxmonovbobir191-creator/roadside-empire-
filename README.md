@@ -5,6 +5,7 @@ Every car is a real physics vehicle (Rapier ray-cast suspension, torque curve, g
 friction-limited brakes, Ackermann steering) driven by an AI driver (pure pursuit + Intelligent Driver Model).
 
 - **Play loop:** cars pull in, fill up, pay → collect cash → upgrade pumps, flow, price, billboard, shop, staff → chapter goals → next, busier road (×3).
+- **Retention:** 7-day daily reward streak (x2 with an ad), day-night cycle, synthesized sound effects with a mute button.
 - **Monetisation:** rewarded ads (x2 income, gift, x2 offline earnings), interstitial at chapter breaks (max 1 per 3 min), bottom banner. AdMob on Android via Capacitor.
 - **Stack:** Vite + TypeScript, three.js (procedural low-poly-realistic models, PBR sky lighting), Rapier 3D (WASM), Capacitor 8.
 

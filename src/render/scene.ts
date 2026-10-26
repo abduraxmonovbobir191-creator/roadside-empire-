@@ -34,6 +34,7 @@ export class Stage {
     // physically based sky; the same sky lights the scene through a pre-filtered env map
     const sky = new Sky();
     sky.scale.setScalar(4000);
+    this.skyUniforms = sky.material.uniforms;
     const u = sky.material.uniforms;
     u.turbidity.value = 6;
     u.rayleigh.value = 1.6;
@@ -67,7 +68,9 @@ export class Stage {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
-    this.scene.add(new THREE.HemisphereLight(0xe2e9ef, 0x5a5144, 0.35));
+    this.hemi = new THREE.HemisphereLight(0xe2e9ef, 0x5a5144, 0.35);
+    this.moon = new THREE.DirectionalLight(0x7f9bd6, 0);
+    this.scene.add(this.hemi, this.moon, this.moon.target);
 
     this.bindInput(canvas);
     this.resize();
@@ -108,9 +111,42 @@ export class Stage {
     // keep the shadow frustum on what the camera looks at
     this.sun.target.position.copy(this.target);
     this.sun.position.copy(this.target).add(this.sunOffset);
+    this.moon.target.position.copy(this.target);
+    this.moon.position.copy(this.target).add(this.moonOffset);
   }
 
   private sunOffset = new THREE.Vector3().setFromSphericalCoords(140, THREE.MathUtils.degToRad(90 - 38), THREE.MathUtils.degToRad(215));
+  private moonOffset = new THREE.Vector3(-60, 90, 40);
+  private hemi!: THREE.HemisphereLight;
+  private moon!: THREE.DirectionalLight;
+  private skyUniforms!: Record<string, THREE.IUniform>;
+  private readonly dayFog = new THREE.Color(0xb9c6cf);
+  private readonly nightFog = new THREE.Color(0x0b1220);
+  private readonly dusk = new THREE.Color(0xff9a52);
+  private readonly noon = new THREE.Color(0xfff1dc);
+  /** 0 = full day, 1 = full night; read by lamps and headlights */
+  night = 0;
+
+  /** Move the sun for a clock hour (0-24): rises at 6, sets at 18, east -> south -> west. */
+  setHour(hour: number) {
+    const day = (hour - 6) / 12;
+    const elev = Math.sin(Math.PI * day) * 62; // degrees; negative at night
+    const az = 90 + THREE.MathUtils.clamp(day, -0.2, 1.2) * 180;
+    this.sunOffset.setFromSphericalCoords(140, THREE.MathUtils.degToRad(90 - Math.max(elev, -10)), THREE.MathUtils.degToRad(az));
+    (this.skyUniforms.sunPosition.value as THREE.Vector3).copy(this.sunOffset).normalize();
+    const light = THREE.MathUtils.clamp((elev + 2) / 20, 0, 1); // 0 below the horizon, 1 above ~18 degrees
+    this.night = 1 - THREE.MathUtils.smoothstep(elev, -6, 8);
+    this.sun.intensity = 3.1 * Math.pow(light, 0.7);
+    this.sun.color.copy(this.dusk).lerp(this.noon, light);
+    this.moon.intensity = 0.9 * this.night;
+    this.hemi.intensity = 0.32 + 0.03 * (1 - this.night);
+    this.scene.environmentIntensity = 0.08 + 0.14 * (1 - this.night);
+    this.renderer.toneMappingExposure = 0.85 - 0.05 * (1 - this.night);
+    this.skyUniforms.rayleigh.value = 1.6 + 1.4 * (1 - light) * (1 - this.night);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(this.dayFog).lerp(this.nightFog, this.night);
+    this.skyUniforms.turbidity.value = 6;
+  }
 
   render() {
     this.renderer.render(this.scene, this.camera);

@@ -29,6 +29,8 @@ export class StationView {
   private billboard: THREE.Group;
   private tillCoins: THREE.InstancedMesh;
   private attendants: THREE.Group[] = [];
+  private ledMat!: THREE.MeshStandardMaterial;
+  private lampMats: THREE.MeshStandardMaterial[] = [];
   readonly tillPos = new THREE.Vector3(TILL.x, 1.1, TILL.z);
   private shown = { pumps: -1, shop: -1, sign: -1, price: "", attendant: -1 };
 
@@ -111,7 +113,7 @@ export class StationView {
       band.position.set(x, CANOPY_H + 0.45, ISLAND_Z);
       canopy.add(band);
     }
-    const ledMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff6e8, emissiveIntensity: 1.4 });
+    const ledMat = (this.ledMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff6e8, emissiveIntensity: 1.4 }));
     for (const x of [-18, -6, 6, 18])
       for (const z of [ROWS[0], ROWS[1]]) {
         const led = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.8), ledMat);
@@ -341,7 +343,9 @@ export class StationView {
       const lp = new THREE.Group();
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 8, 8), new THREE.MeshStandardMaterial({ color: 0x5b6067, metalness: 0.6, roughness: 0.4 }));
       post.position.y = 4;
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.15, 0.35), new THREE.MeshStandardMaterial({ color: 0x5b6067, emissive: 0xfff3d6, emissiveIntensity: 0.3 }));
+      const lampMat = new THREE.MeshStandardMaterial({ color: 0x5b6067, emissive: 0xfff3d6, emissiveIntensity: 0.3 });
+      this.lampMats.push(lampMat);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.15, 0.35), lampMat);
       head.position.set(0, 8, -0.3);
       lp.add(post, head);
       lp.position.set(x, 0, 6.2);
@@ -374,7 +378,10 @@ export class StationView {
   }
 
   /** Sync visuals with the economy state. */
-  update(opts: { pumps: number; shop: number; sign: number; priceText: string; till: number; attendant: number; t: number }) {
+  update(opts: { pumps: number; shop: number; sign: number; priceText: string; till: number; attendant: number; t: number; night: number }) {
+    this.ledMat.emissiveIntensity = 0.5 + 2.2 * opts.night;
+    for (const m of this.lampMats) m.emissiveIntensity = 0.2 + 4 * opts.night;
+    (this.shopLights.material as THREE.MeshStandardMaterial).emissiveIntensity = this.shown.shop > 0 ? 0.35 + 1.4 * opts.night : 0.05;
     if (opts.pumps !== this.shown.pumps) {
       this.shown.pumps = opts.pumps;
       // dispensers: island i is used once any of its two slots is unlocked
@@ -395,7 +402,6 @@ export class StationView {
       mat.map?.dispose();
       mat.map = tex.shopSign(opts.shop > 0 ? "MARKET 24/7" : "KASSA");
       mat.needsUpdate = true;
-      (this.shopLights.material as THREE.MeshStandardMaterial).emissiveIntensity = opts.shop > 0 ? 0.9 : 0.05;
     }
     if (opts.sign !== this.shown.sign) {
       this.shown.sign = opts.sign;

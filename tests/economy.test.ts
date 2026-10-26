@@ -79,3 +79,32 @@ describe("economy", () => {
     expect(s.goalsClaimed).toEqual([]);
   });
 });
+
+describe("daily reward", () => {
+  const day = (n: number) => new Date(2026, 0, 1 + n, 12).getTime();
+
+  test("first claim is day 1, a second claim on the same day is refused", () => {
+    const s = eco.newState(0);
+    expect(eco.dailyNext(s, day(0))).toBe(0);
+    expect(eco.claimDaily(s, day(0), false)).toBeGreaterThan(0);
+    expect(eco.dailyNext(s, day(0))).toBeNull();
+    expect(eco.claimDaily(s, day(0), false)).toBe(0);
+  });
+
+  test("streak grows on consecutive days, wraps after 7, resets after a gap", () => {
+    const s = eco.newState(0);
+    for (let i = 0; i < 7; i++) {
+      expect(eco.dailyNext(s, day(i))).toBe(i);
+      eco.claimDaily(s, day(i), false);
+    }
+    expect(eco.dailyNext(s, day(7))).toBe(0);
+    eco.claimDaily(s, day(7), false);
+    expect(eco.dailyNext(s, day(9))).toBe(0);
+  });
+
+  test("an ad doubles the gift", () => {
+    const a = eco.newState(0);
+    const b = eco.newState(0);
+    expect(eco.claimDaily(b, day(0), true)).toBe(eco.claimDaily(a, day(0), false) * 2);
+  });
+});

@@ -24,6 +24,9 @@ export type State = {
   missed: number;
   goalsClaimed: number[];
   noAds: boolean;
+  /** daily reward: 0..6 = day of the streak that was claimed last, and its local date (YYYY-MM-DD) */
+  dailyDay: number;
+  dailyDate: string;
 };
 
 export function newState(now = Date.now()): State {
@@ -43,6 +46,8 @@ export function newState(now = Date.now()): State {
     missed: 0,
     goalsClaimed: [],
     noAds: false,
+    dailyDay: -1,
+    dailyDate: "",
   };
 }
 
@@ -173,6 +178,36 @@ export function giftAmount(s: State): number {
   return Math.round(Math.max(50 * chapterScale(s.chapter), s.rate * 90));
 }
 
+const DAILY_BASE = [100, 160, 260, 420, 650, 950, 2500];
+
+export function dayKey(now: number): string {
+  const d = new Date(now);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Which day of the 7-day streak is up next, or null if today's gift was already taken. */
+export function dailyNext(s: State, now: number): number | null {
+  const today = dayKey(now);
+  if (s.dailyDate === today) return null;
+  const yesterday = dayKey(now - 24 * 3600 * 1000);
+  return s.dailyDate === yesterday && s.dailyDay >= 0 ? (s.dailyDay + 1) % 7 : 0;
+}
+
+export function dailyAmount(s: State, day: number): number {
+  return Math.round(Math.max(DAILY_BASE[day] * chapterScale(s.chapter), s.rate * 120 * (1 + day * 0.4)));
+}
+
+/** Claim today's gift; `doubled` after watching an ad. Returns the amount (0 when not available). */
+export function claimDaily(s: State, now: number, doubled: boolean): number {
+  const day = dailyNext(s, now);
+  if (day === null) return 0;
+  const amount = dailyAmount(s, day) * (doubled ? 2 : 1);
+  s.dailyDay = day;
+  s.dailyDate = dayKey(now);
+  credit(s, amount);
+  return amount;
+}
+
 export type Goal = { id: number; text: string; done: (s: State) => boolean; reward: (s: State) => number };
 
 export const GOALS: Goal[] = [
@@ -206,7 +241,7 @@ export function chapterComplete(s: State): boolean {
 /** Move to the next, busier road: upgrades reset, everything costs and pays 3× more. */
 export function nextChapter(s: State, now = Date.now()): void {
   if (!chapterComplete(s)) return;
-  const keep = { lifetime: s.lifetime, cars: s.cars, missed: s.missed, noAds: s.noAds, chapter: s.chapter + 1 };
+  const keep = { lifetime: s.lifetime, cars: s.cars, missed: s.missed, noAds: s.noAds, dailyDay: s.dailyDay, dailyDate: s.dailyDate, chapter: s.chapter + 1 };
   const fresh = newState(now);
   Object.assign(s, fresh, keep);
   s.money = 120 * chapterScale(s.chapter);
@@ -229,6 +264,8 @@ export function load(raw: string | null, now = Date.now()): State {
     if (!Number.isInteger(s.chapter) || s.chapter < 1) s.chapter = 1;
     if (!Array.isArray(s.goalsClaimed)) s.goalsClaimed = [];
     s.noAds = s.noAds === true;
+    if (!Number.isInteger(s.dailyDay) || s.dailyDay < -1 || s.dailyDay > 6) s.dailyDay = -1;
+    if (typeof s.dailyDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s.dailyDate)) s.dailyDate = "";
     return s;
   } catch {
     return base;

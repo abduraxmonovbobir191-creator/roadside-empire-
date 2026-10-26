@@ -10,8 +10,10 @@ import { SLOTS, TILL } from "./game/layout";
 import * as eco from "./game/economy";
 import { initAds, maybeInterstitial, setNoAds, showBanner, showRewarded } from "./ads";
 import { duration, h, money } from "./ui/format";
+import { sfx } from "./audio";
 
 const SAVE_KEY = "roadside-empire:v1";
+const DAY_SECONDS = 600; // one full day-night cycle in real seconds
 const BOOST_MS = 5 * 60 * 1000;
 const BOOST_CAP_MS = 30 * 60 * 1000;
 
@@ -50,6 +52,8 @@ class Game {
   private acc = 0;
   private last = performance.now();
   private t = 0;
+  private hour = 14;
+  private fixedHour = new URLSearchParams(location.search).get("hour");
   private rateAcc = 0;
   private rateTimer = 0;
   private saveTimer = 0;
@@ -108,6 +112,7 @@ class Game {
     this.rateAcc += amount;
     const where = this.state.levels.cashier ? new THREE.Vector3(slot.x, 2.6, slot.z) : new THREE.Vector3(TILL.x, 1.8, TILL.z);
     this.floatText(`+$${money(amount)}`, where);
+    if (this.state.levels.cashier) sfx.coin();
   }
 
   private simStep() {
@@ -143,8 +148,13 @@ class Game {
       this.save();
     }
 
+    this.hour = this.fixedHour !== null ? Number(this.fixedHour) : (this.hour + dt * (24 / DAY_SECONDS)) % 24;
+    this.stage.setHour(this.hour);
+    MAT.head.emissiveIntensity = 0.6 + 4 * this.stage.night;
+    MAT.tail.emissiveIntensity = 0.25 + 1.2 * this.stage.night;
     this.syncCars();
     this.station.update({
+      night: this.stage.night,
       pumps: this.state.levels.pumps,
       shop: this.state.levels.shop,
       sign: this.state.levels.sign,
@@ -202,7 +212,14 @@ class Game {
     gift.addEventListener("click", () => this.watchGift());
     const goals = h("button", "round", `<span class="ico">📋</span>Vazifa<span class="badge" id="goalBadge"></span>`);
     goals.addEventListener("click", () => this.openGoals());
-    side.append(boost, gift, goals);
+    const mute = h("button", "round", `<span class="ico">${sfx.muted ? "🔇" : "🔊"}</span>Ovoz`);
+    mute.addEventListener("click", () => {
+      sfx.setMuted(!sfx.muted);
+      mute.querySelector(".ico")!.textContent = sfx.muted ? "🔇" : "🔊";
+      sfx.tap();
+    });
+    side.append(boost, gift, goals, mute);
+    addEventListener("pointerdown", () => sfx.unlock(), { once: true });
     ui.append(side);
 
     const bottom = h("div", "bottom");
@@ -329,15 +346,18 @@ class Game {
   // ---------------------------------------------------------------- actions
   private collect() {
     const got = eco.collectTill(this.state);
+    if (got > 0) sfx.coin();
     if (got > 0) this.floatText(`+$${money(got)}`, new THREE.Vector3(TILL.x, 2.4, TILL.z));
     this.hud();
   }
 
   private buy(id: eco.UpgradeId) {
     if (!eco.buy(this.state, id)) {
+      sfx.deny();
       this.toast("Pul yetmaydi");
       return;
     }
+    sfx.buy();
     if (id === "pumps") {
       const slot = SLOTS[this.state.levels.pumps - 1];
       this.floatText("Yangi kolonka!", new THREE.Vector3(slot.x, 3, slot.z));
@@ -354,6 +374,7 @@ class Game {
     }
     if (!(await showRewarded())) return;
     s.boostUntil = Math.max(Date.now(), s.boostUntil) + BOOST_MS;
+    sfx.reward();
     this.toast("5 daqiqa x2 daromad!");
     this.save();
   }
@@ -365,6 +386,7 @@ class Game {
     const amount = eco.giftAmount(s);
     eco.credit(s, amount);
     s.giftReadyAt = Date.now() + eco.GIFT_COOLDOWN_MS;
+    sfx.reward();
     this.modal(`<h3>🎁 <b>Sovg'a</b></h3><div class="big">+$${money(amount)}</div>`, [{ text: "Zo'r!", cls: "gold" }]);
     this.save();
   }
@@ -501,6 +523,7 @@ class Game {
             const ok = await showRewarded();
             eco.credit(s, ok ? amount * 2 : amount);
             this.save();
+            setTimeout(() => this.maybeDaily(), 400);
           },
         },
         {
@@ -510,6 +533,41 @@ class Game {
             eco.credit(s, amount);
             this.save();
             if (seconds > 600) await maybeInterstitial();
+            setTimeout(() => this.maybeDaily(), 400);
+          },
+        },
+      ],
+    );
+  }
+
+  /** Daily streak gift: once per local day, x2 when the player watches an ad. */
+  maybeDaily() {
+    const day = eco.dailyNext(this.state, Date.now());
+    if (day === null || document.querySelector(".modal-wrap")) return;
+    const amount = eco.dailyAmount(this.state, day);
+    const dots = Array.from({ length: 7 }, (_, i) => `<span style="display:inline-block;width:26px;height:26px;border-radius:50%;margin:0 3px;line-height:26px;font-size:12px;font-weight:900;${i < day ? "background:#4cd27a;color:#08331a" : i === day ? "background:#ffc93c;color:#3b2a00" : "background:#2a2d33;color:#8b8f97"}">${i + 1}</span>`).join("");
+    this.modal(
+      `<h3>📅 <b>Kunlik sovg'a</b></h3><p>Ketma-ket ${day + 1}-kun. Har kuni kirsangiz sovg'a kattalashadi.</p><div>${dots}</div><div class="big">+$${money(amount)}</div>`,
+      [
+        {
+          text: `x2 olish ($${money(amount * 2)}) · reklama`,
+          cls: "gold",
+          onClick: async () => {
+            const ok = await showRewarded();
+            const got = eco.claimDaily(this.state, Date.now(), ok);
+            sfx.reward();
+            this.toast(`+$${money(got)}`);
+            this.save();
+          },
+        },
+        {
+          text: "Olish",
+          cls: "ghost",
+          onClick: () => {
+            const got = eco.claimDaily(this.state, Date.now(), false);
+            sfx.reward();
+            this.toast(`+$${money(got)}`);
+            this.save();
           },
         },
       ],
@@ -552,6 +610,7 @@ async function boot() {
   setNoAds(game.state.noAds);
   void showBanner(true);
   if (amount > 0) game.offline(seconds, amount);
+  else setTimeout(() => game.maybeDaily(), 1200);
 }
 
 void boot();
